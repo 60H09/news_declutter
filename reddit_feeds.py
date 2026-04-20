@@ -66,31 +66,40 @@ SUBREDDIT_MAP = {
     "self improvement": ["selfimprovement", "DecidingToBeBetter"]
 }
 
-def fetch_reddit(subreddit="technology", limit=5):
-    if subreddit not in SUBREDDIT_MAP:
-        subreddit = SUBREDDIT_MAP["world news"]
-    else:        
-        subreddit = SUBREDDIT_MAP[subreddit]
-    for sub in subreddit:
-        url = f"https://www.reddit.com/r/{sub}/hot.json?limit={limit}"
-        print(url)
-        headers = {
-            "User-Agent": "signal-feed-app/0.1"
-        }
+def fetch_reddit(interest="technology", limit=5):
+    key = interest.strip().lower()
 
-    response = requests.get(url, headers=headers)
-    data = response.json()
+    # Skip unknown interests
+    if key not in SUBREDDIT_MAP:
+        return []
 
+    subreddits = SUBREDDIT_MAP[key]
     posts = []
 
-    for child in data["data"]["children"]:
-        post = child["data"]
+    headers = {
+        "User-Agent": "signal-feed-app/0.1"
+    }
 
-        posts.append({
-            "title": post["title"],
-            "source": f"reddit:r/{subreddit}",
-            "url": "https://reddit.com" + post["permalink"],
-            "category": subreddit
-        })
+    for sub in subreddits:
+        url = f"https://www.reddit.com/r/{sub}/hot.json?limit={limit}"
+        print(url)
+
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            data = response.json()
+
+            for child in data["data"]["children"]:
+                post = child["data"]
+
+                posts.append({
+                    "title": post["title"],
+                    "source": f"reddit:r/{sub}",
+                    "url": "https://reddit.com" + post["permalink"],
+                    "category": key
+                })
+
+        except Exception as e:
+            print("reddit fetch error:", e)
+
     save_items(posts)
     return posts

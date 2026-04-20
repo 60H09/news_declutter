@@ -85,22 +85,27 @@ def save_items(items):
 
         for item in items:
             try:
+                category = item.get("category", "")
+
+                if isinstance(category, list):
+                    category = ", ".join(category)
+
                 cursor.execute("""
-                INSERT OR IGNORE INTO content
-                (title, source, url, category, published_at)
-                VALUES (?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO content
+                    (title, source, url, category, published_at)
+                    VALUES (?, ?, ?, ?, ?)
                 """, (
-                    item["title"],
-                    item["source"],
-                    item["url"],
-                    item["category"],
+                    item.get("title"),
+                    item.get("source"),
+                    item.get("url"),
+                    category,
                     item.get("published_at", "")
                 ))
+
             except Exception as e:
-                print("save_items error:", e)
+                print("save_items error:", e, item)
 
         conn.commit()
-
 
 # ---------------------------------
 # Create User
@@ -149,3 +154,36 @@ def save_sub_interest(user_id, parent_interest, sub_interest, weight):
         """, (user_id, parent_interest, sub_interest, weight))
 
         conn.commit()
+
+
+def get_unique_interest_keywords():
+    """
+    Fetch all unique interests + sub-interests
+    Returns one clean Python list
+    Useful for populating content table / feed queries
+    """
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Main interests
+    cursor.execute("""
+        SELECT interest
+        FROM user_interests
+    """)
+    interests = [row[0].strip().lower() for row in cursor.fetchall() if row[0]]
+
+    # Sub interests
+    cursor.execute("""
+        SELECT sub_interest
+        FROM user_sub_interests
+    """)
+    sub_interests = [row[0].strip().lower() for row in cursor.fetchall() if row[0]]
+
+    conn.close()
+
+    # Merge + remove duplicates
+    combined = interests + sub_interests
+    unique_keywords = sorted(list(set(combined)))
+
+    return unique_keywords

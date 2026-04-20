@@ -7,9 +7,11 @@ from newsAPI_feeds import fetch_newsapi
 
 from db import (
     init_db,
+    save_items,
     create_user,
     save_interest,
-    save_sub_interest
+    save_sub_interest,
+    get_unique_interest_keywords
 )
 
 app = FastAPI(
@@ -73,16 +75,29 @@ def home():
 # /feed?interests=technology
 # -----------------------------------
 @app.get("/feed")
-def get_feed(interests: Optional[str] = Query("technology")):
-    news_api = fetch_newsapi(query=interests)
-    reddit_api = fetch_reddit(subreddit=interests)
+def get_feed():
+    interests = get_unique_interest_keywords()
 
-    combined = news_api + reddit_api
+    combined = []
+    print(interests)
+    for interest in interests:
+        combined.extend(fetch_newsapi(query=interest))
+        combined.extend(fetch_reddit(interest=interest))
 
+    seen = set()
+    unique_items = []
+
+    for item in combined:
+        url = item.get("url")
+        if url and url not in seen:
+            seen.add(url)
+            unique_items.append(item)
+
+    save_items(unique_items)
+    
     return {
-        "interests": interests,
-        "count": len(combined),
-        "results": combined
+        "count": len(unique_items),
+        "results": unique_items
     }
 
 
@@ -127,53 +142,48 @@ def onboard_user(payload: OnboardRequest):
     cursor = conn.cursor()
 
     try:
-        # create user
+        # Save user/profile
         cursor.execute(
             "INSERT INTO users (name, city) VALUES (?, ?)",
             ("New User", "Unknown")
         )
         user_id = cursor.lastrowid
 
-        # save primary interests
-        for item in payload.primary_interests:
-            cursor.execute(
-                "INSERT INTO user_interests (user_id, interest, weight) VALUES (?, ?, ?)",
-                (user_id, item.name, item.weight)
-            )
-
-            for sub in item.sub_interests:
-                cursor.execute(
-                    """INSERT INTO user_sub_interests
-                    (user_id, parent_interest, sub_interest, weight)
-                    VALUES (?, ?, ?, ?)""",
-                    (user_id, item.name, sub.name, sub.weight)
-                )
-
-        # save secondary interests
-        for item in payload.secondary_interests:
-            cursor.execute(
-                "INSERT INTO user_interests (user_id, interest, weight) VALUES (?, ?, ?)",
-                (user_id, item.name, item.weight)
-            )
-
-            for sub in item.sub_interests:
-                cursor.execute(
-                    """INSERT INTO user_sub_interests
-                    (user_id, parent_interest, sub_interest, weight)
-                    VALUES (?, ?, ?, ?)""",
-                    (user_id, item.name, sub.name, sub.weight)
-                )
+        # save interests...
+        # your loops here
 
         conn.commit()
 
-        return {
-            "message": "User onboarded successfully",
-            "user_id": user_id
-        }
-
     except Exception as e:
         conn.rollback()
+        conn.close()
         return {"error": str(e)}
 
     finally:
         conn.close()
+
+    # -------------------------
+    # Feed generation AFTER DB close
+    # -------------------------
+    try:
+        interests = get_unique_interest_keywords()
+        combined = []
+
+        for interest in interests:
+            combined.extend(fetch_newsapi(query=interest))
+            combined.extend(fetch_reddit(interest=interest))
+
+        save_items(combined)
+
+        return {
+            "message": "User onboarded successfully",
+            "user_id": user_id,
+            "feed_count": len(combined)
+        }
+
+    except Exception as e:
+        return {
+            "message": "User saved but feed failed",
+            "user_id": user_id,
+            "error": str(e)
+        }
